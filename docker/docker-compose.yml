@@ -1,0 +1,97 @@
+version: '3.2'
+services:
+    postgres:
+        image: postgres:9.4
+        container_name: precificador-postgres
+        ports:
+            - "5432:5432"
+        volumes:
+            - ~/var/lib/postgresql/data:/var/lib/postgresql/data
+            - ~/var/log/postgresql:/var/log/postgresql
+            - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+        networks:
+          - prc-network
+
+    redis:
+        image: redis:latest
+        container_name: precificador-redis
+        command: >
+          --requirepass Kt89N34Vz955
+        volumes:
+            - ~/docker-volumes/redis/data:/data
+        ports:
+          - "6379:6379"
+        networks:
+          - prc-network
+
+    postgres-bigdata:
+        image: postgres:9.4
+        container_name: precificador-postgres-bigdata
+        ports:
+            - "5433:5432"
+        volumes:
+            - ~/var/lib/postgresql-bigdata/data:/var/lib/postgresql/data
+            - ~/var/log/postgresql-bigdata:/var/log/postgresql
+            - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+        networks:
+          - prc-network
+
+    rf-api:
+        image: docker.reservafacil.tur.br/reservafacil/tomcat-dev:latest
+        container_name: rf-api
+        dns: 192.168.100.1
+        volumes:
+            - ${PROJECTS_PATH}/rf-api/target/rfapi*.war:/var/lib/tomcat7/webapps/rfapi.war
+            - ${PROJECTS_PATH}/rf-api/target/rfapi-dev/:/var/lib/tomcat7/webapps/rfapi/
+            - ${PROJECTS_PATH}/rf-api/src/test/resources/chave_cripto.jck:/opt/etkt/keys/etkt.jck
+            - /srv/rf-api/logs:/var/lib/tomcat7/logs
+        ports:
+          - "8001:8000"
+          - "8081:8080"
+        networks:
+          - prc-network
+
+    precificador-front:
+        image: nginx
+        container_name: precificador-front
+        environment:
+          - http_proxy=http://192.168.110.1:3128
+          - https_proxy=http://192.168.110.1:3128
+        ports:
+          - "3000:80"
+        volumes:
+          - ${PROJECTS_PATH}/precificador-front/public/:/usr/share/nginx/html
+
+    precificador:
+        build:
+          dockerfile: precificador/Dockerfile
+          context: .
+        container_name: precificador
+        dns: 192.168.100.1
+        environment:
+          - DNS=192.168.100.1
+          - HTTP_PROXY=http://proxy.rf.intranet:3128/
+          - HTTPS_PROXY=http://proxy.rf.intranet:3128/
+          - NO_PROXY=http://proxy.rf.intranet:3128/
+          - CATALINA_OPTS=-Xss10m -Xms1024M -Xmx2048M -agentlib:jdwp=transport=dt_socket,address=8480,server=y,suspend=n
+          - JAVA_OPTS=-Dspring.profiles.active='dockerdev'
+        volumes:
+            - ../target/precificador.war:/var/lib/tomcat7/webapps/precificador.war
+            - ../target/logs:/usr/local/tomcat/logs
+        links:
+          - redis
+          - postgres
+          - postgres-bigdata
+          - rf-api
+        ports:
+          - "8480:8080"
+          - "5005:5005"
+        networks:
+          - prc-network
+        extra_hosts:
+          - "dockerhost:${LOCALHOST_DOCKER}"
+
+
+networks:
+    prc-network:
+        driver: bridge
